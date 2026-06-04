@@ -268,6 +268,54 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
+async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = sqlite3.connect("reminders.db")
+    c = conn.cursor()
+    c.execute("SELECT id, user_mention, message, remind_time FROM reminders WHERE sent = 0 ORDER BY remind_time")
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text(u"\U0001f4cb \u041d\u0435\u0442 \u0430\u043a\u0442\u0438\u0432\u043d\u044b\u0445 \u043d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0439.")
+        return
+
+    text = u"\U0001f4cb \u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u043d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u044f:\n\n"
+    for row in rows:
+        rid, mention, message, remind_time = row
+        dt = datetime.strptime(remind_time, "%Y-%m-%d %H:%M:%S").strftime("%d.%m %H:%M")
+        text += f"#{rid} {mention} — {dt}\n{message}\n\n"
+
+    await update.message.reply_text(text)
+
+
+async def del_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(u"\u041f\u0440\u0438\u043c\u0435\u0440: /del 5")
+        return
+
+    try:
+        rid = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text(u"\u041d\u0430\u043f\u0438\u0448\u0438 \u043d\u043e\u043c\u0435\u0440: /del 5")
+        return
+
+    conn = sqlite3.connect("reminders.db")
+    c = conn.cursor()
+    c.execute("SELECT id FROM reminders WHERE id = ? AND sent = 0", (rid,))
+    row = c.fetchone()
+
+    if not row:
+        await update.message.reply_text(u"\u274c \u041d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0435 #" + str(rid) + u" \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e.")
+        conn.close()
+        return
+
+    c.execute("DELETE FROM reminders WHERE id = ?", (rid,))
+    conn.commit()
+    conn.close()
+
+    await update.message.reply_text(u"\u2705 \u041d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0435 #" + str(rid) + u" \u0443\u0434\u0430\u043b\u0435\u043d\u043e.")
+
+
 async def r_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.from_user:
         save_user(update.message.from_user)
@@ -337,6 +385,8 @@ def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("r", r_command))
+    app.add_handler(CommandHandler("list", list_command))
+    app.add_handler(CommandHandler("del", del_command))
     app.add_handler(CommandHandler("users", users_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
