@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import logging
 import re
+import requests
+import base64
 from datetime import datetime, timedelta
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -10,8 +12,18 @@ import sqlite3
 TOKEN = "8298325705:AAEiZrEL9YRXxvp-gwCihjimxdK8aDWYGFQ"
 GROUP_CHAT_ID = -4970587500
 
+# RingCentral credentials
+RC_CLIENT_ID = "5jt8YRCPMIrdeFBMagsz6X"
+RC_CLIENT_SECRET = "eRdQ1v22qb9dLWkG10dVLS8jVRhsdWQSWeCzTIAGMbP7"
+RC_JWT = "eyJraWQiOiI4NzYyZjU5OGQwNTk0NGRiODZiZjVjYTk3ODA0NzYwOCIsInR5cCI6IkpXVCIsImFsZyI6IlJTMjU2In0.eyJhdWQiOiJodHRwczovL3BsYXRmb3JtLnJpbmdjZW50cmFsLmNvbS9yZXN0YXBpL29hdXRoL3Rva2VuIiwic3ViIjoiMzUwNjc3OTAyMCIsImlzcyI6Imh0dHBzOi8vcGxhdGZvcm0ucmluZ2NlbnRyYWwuY29tIiwiZXhwIjozOTI4MDk3OTI3LCJpYXQiOjE3ODA2MTQyODAsImp0aSI6IjFRQ0JKU1paVFd5SmlBOG1SWnNGQ0EifQ.UgFHdmYHHMGXnGAahezVMzrfCR1ZLBv4HcodB5X1pDdqfe9DiZ750MjSh4AoEkutUmDIfK0JagNHetJ_jmJN8CUOzp-hXSAopFnDV05nXEQxZQWlBLA3eiOyzdapqs7KXNRduWSDq_erRMqafUbSY120Gqmp2jF54_8vda4_d6yl9FcFnzz7cib6u_7W2DA1ajzybppt6gWq_yP6EGMVseMqgy09zu673izUPGyuW7zzdAujS80gUyaegZc2dq9oJV_n0VgDE9i8X2Q500k7KEOOj0cS4ZnvRTEQ4SE5zhVPX-GS-ntsQKUslweQ3iN7V9yczLISrvjAmKCKhTZqpQ"
+RC_SMS_SENDER = "50564"
+
 logging.basicConfig(level=logging.INFO)
 scheduler = AsyncIOScheduler()
+
+rc_access_token = None
+rc_token_expiry = None
+
 
 def init_db():
     conn = sqlite3.connect("reminders.db")
@@ -22,8 +34,124 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS users
                  (id INTEGER PRIMARY KEY, user_id INTEGER UNIQUE, username TEXT,
                   first_name TEXT, last_name TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS sms_log
+                 (id INTEGER PRIMARY KEY, message_id TEXT UNIQUE, received_at TEXT)''')
     conn.commit()
     conn.close()
+
+
+def is_sms_forwarded(message_id):
+    conn = sqlite3.connect("reminders.db")
+    c = conn.cursor()
+    c.execute("SELECT id FROM sms_log WHERE message_id = ?", (str(message_id),))
+    result = c.fetchone()
+    conn.close()
+    return result is not None
+
+
+def mark_sms_forwarded(message_id):
+    conn = sqlite3.connect("reminders.db")
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO sms_log (message_id, received_at) VALUES (?, ?)",
+              (str(message_id), datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+
+
+def get_rc_token():
+    global rc_access_token, rc_token_expiry
+
+    if rc_access_token and rc_token_expiry and datetime.now() < rc_token_expiry:
+        return rc_access_token
+
+    credentials = base64.b64encode(f"{RC_CLIENT_ID}:{RC_CLIENT_SECRET}".encode()).decode()
+
+    response = requests.post(
+        "https://platform.ringcentral.com/restapi/oauth/token",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        data={
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": RC_JWT
+        }
+    )
+
+    if response.status_code == 200:
+        data = response.json()
+        rc_access_token = data["access_token"]
+        rc_token_expiry = datetime.now() + timedelta(seconds=data.get("expires_in", 3600) - 60)
+        logging.info("RingCentral token obtained successfully")
+        return rc_access_token
+    else:
+        logging.error(f"RC token error: {response.status_code} {response.text}")
+        return None
+
+
+async def check_rc_sms(app):
+    try:
+        token = get_rc_token()
+        if not token:
+            return
+
+        date_from = (datetime.utcnow() - timedelta(minutes=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        response = requests.get(
+            "https://platform.ringcentral.com/restapi/v1.0/account/~/extension/~/message-store",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "messageType": "SMS",
+                "dateFrom": date_from,
+                "perPage": 20
+            }
+        )
+
+        if response.status_code != 200:
+            logging.error(f"RC SMS fetch error: {response.status_code} {response.text}")
+            return
+
+        data = response.json()
+        records = data.get("records", [])
+
+        for msg in records:
+            msg_id = str(msg.get("id", ""))
+            direction = msg.get("direction", "")
+            from_number = msg.get("from", {}).get("phoneNumber", "")
+
+            if direction != "Inbound":
+                continue
+            if RC_SMS_SENDER not in from_number:
+                continue
+            if is_sms_forwarded(msg_id):
+                continue
+
+            # Get SMS text
+            text = msg.get("subject", "").strip()
+
+            # If text is in attachment
+            if not text:
+                for att in msg.get("attachments", []):
+                    if att.get("type") == "Text":
+                        att_response = requests.get(
+                            att["uri"],
+                            headers={"Authorization": f"Bearer {token}"}
+                        )
+                        if att_response.status_code == 200:
+                            text = att_response.text.strip()
+                        break
+
+            if not text:
+                text = u"(текст недоступен)"
+
+            telegram_msg = u"\U0001f4f1 \u041d\u043e\u0432\u043e\u0435 SMS \u043e\u0442 CitizenShipper:\n\n" + text
+            await app.bot.send_message(chat_id=GROUP_CHAT_ID, text=telegram_msg)
+            mark_sms_forwarded(msg_id)
+            logging.info(f"Forwarded SMS {msg_id} to Telegram")
+
+    except Exception as e:
+        logging.error(f"check_rc_sms error: {e}")
+
 
 def save_user(user):
     conn = sqlite3.connect("reminders.db")
@@ -34,6 +162,7 @@ def save_user(user):
     conn.commit()
     conn.close()
 
+
 def parse_reminder(text):
     mention = re.search(r'@\w+', text)
     mention = mention.group(0) if mention else ""
@@ -41,7 +170,7 @@ def parse_reminder(text):
     now = datetime.now()
     remind_time = None
 
-    if re.search(r'\u0437\u0430\u0432\u0442\u0440\u0430|tomorrow', text, re.IGNORECASE):
+    if re.search(u'\u0437\u0430\u0432\u0442\u0440\u0430|tomorrow', text, re.IGNORECASE):
         time_match = re.search(r'(\d{1,2}):(\d{2})', text)
         if time_match:
             h, m = int(time_match.group(1)), int(time_match.group(2))
@@ -59,6 +188,7 @@ def parse_reminder(text):
         remind_time = now.replace(hour=h, minute=m, second=0)
 
     return mention, remind_time
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.from_user:
@@ -94,6 +224,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         u"\u2705 \u041d\u0430\u043f\u043e\u043c\u0438\u043d\u0430\u043d\u0438\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e \u043d\u0430 " + remind_time.strftime('%d.%m.%Y %H:%M')
     )
 
+
 async def check_reminders(app):
     conn = sqlite3.connect("reminders.db")
     c = conn.cursor()
@@ -112,6 +243,7 @@ async def check_reminders(app):
 
     conn.commit()
     conn.close()
+
 
 async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect("reminders.db")
@@ -135,6 +267,7 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(text)
 
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message and update.message.from_user:
         save_user(update.message.from_user)
@@ -149,10 +282,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         u"\u2022 \u041d\u0430\u043f\u043e\u043c\u043d\u0438 @mike \u043f\u043e\u0437\u0432\u043e\u043d\u0438\u0442\u044c \u0447\u0435\u0440\u0435\u0437 2 \u0447\u0430\u0441\u0430"
     )
 
+
 async def post_init(app):
     scheduler.add_job(check_reminders, 'interval', seconds=30, args=[app])
+    scheduler.add_job(check_rc_sms, 'interval', seconds=60, args=[app])
     scheduler.start()
     print("Bot zapushchen!")
+
 
 def main():
     init_db()
@@ -161,6 +297,7 @@ def main():
     app.add_handler(CommandHandler("users", users_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling()
+
 
 if __name__ == "__main__":
     main()
