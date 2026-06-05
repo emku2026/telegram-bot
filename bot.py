@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import sqlite3
 
-TOKEN = "8298325705:AAEiZrEL9YRXxvp-gwCihjimxdK8aDWYGFQ"
+TOKEN = "8298325705:AAHeY8pfoodkVVVZR_6ABdVlpl92HXyfctk"
 GROUP_CHAT_ID = -4970587500
 
 # RingCentral credentials
