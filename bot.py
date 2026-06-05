@@ -114,10 +114,12 @@ async def check_rc_sms(app):
         data = response.json()
         records = data.get("records", [])
 
+        logging.info(f"RC SMS records found: {len(records)}")
         for msg in records:
             msg_id = str(msg.get("id", ""))
             direction = msg.get("direction", "")
             from_number = msg.get("from", {}).get("phoneNumber", "")
+            logging.info(f"SMS: direction={direction} from={from_number} id={msg_id}")
 
             if direction != "Inbound":
                 continue
