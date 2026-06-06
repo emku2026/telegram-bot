@@ -126,19 +126,26 @@ async def check_rc_sms(app):
             if RC_SMS_SENDER not in from_number:
                 continue
             if is_sms_forwarded(msg_id):
+                logging.info(f"SMS {msg_id} already forwarded, skipping")
                 continue
+
+            logging.info(f"Processing SMS {msg_id}...")
 
             # Get SMS text
             text = msg.get("subject", "").strip()
+            logging.info(f"Subject text: '{text}'")
 
             # If text is in attachment
             if not text:
-                for att in msg.get("attachments", []):
+                attachments = msg.get("attachments", [])
+                logging.info(f"Attachments: {attachments}")
+                for att in attachments:
                     if att.get("type") == "Text":
                         att_response = requests.get(
                             att["uri"],
                             headers={"Authorization": f"Bearer {token}"}
                         )
+                        logging.info(f"Attachment response: {att_response.status_code} '{att_response.text[:100]}'")
                         if att_response.status_code == 200:
                             text = att_response.text.strip()
                         break
@@ -146,6 +153,7 @@ async def check_rc_sms(app):
             if not text:
                 text = u"(текст недоступен)"
 
+            logging.info(f"Sending to Telegram: '{text[:50]}'")
             telegram_msg = u"\U0001f4f1 \u041d\u043e\u0432\u043e\u0435 SMS \u043e\u0442 CitizenShipper:\n\n" + text
             await app.bot.send_message(chat_id=GROUP_CHAT_ID, text=telegram_msg)
             mark_sms_forwarded(msg_id)
