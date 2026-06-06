@@ -308,9 +308,20 @@ async def mc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ins = ins_match.group(1).strip() if ins_match else ""
         ins = re2.sub(r'<[^>]+>', '', ins).strip()
 
+        # Parse phone
+        phone_match = re2.search(r'Phone.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
+        phone = phone_match.group(1).strip() if phone_match else ""
+        phone = re2.sub(r'<[^>]+>', '', phone).strip()
+
         if name:
             emoji = u"\u2705" if "AUTHORIZED" in status.upper() or "ACTIVE" in status.upper() else u"\u274c"
             reply = (
+                f"{emoji} MC-{mc_number}\n\n"
+                f"\U0001f3e2 {name}\n"
+                f"\U0001f4cb USDOT: {dot}\n"
+                f"\U0001f4ca Status: {status}\n"
+                f"\U0001f6e1 Insurance: {ins}\n"
+                f"\U0001f4de Phone: {phone}" if phone else
                 f"{emoji} MC-{mc_number}\n\n"
                 f"\U0001f3e2 {name}\n"
                 f"\U0001f4cb USDOT: {dot}\n"
