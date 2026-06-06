@@ -10,7 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import sqlite3
 
 TOKEN = "8298325705:AAHeY8pfoodkVVVZR_6ABdVlpl92HXyfctk"
-GROUP_CHAT_ID = -4970587500
+GROUP_CHAT_ID = -1003761905191
 
 # RingCentral credentials
 RC_CLIENT_ID = "5jt8YRCPMIrdeFBMagsz6X"
