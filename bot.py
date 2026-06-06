@@ -270,6 +270,63 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
+async def mc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text(u"\u041f\u0440\u0438\u043c\u0435\u0440: /mc 1543888")
+        return
+
+    mc_number = context.args[0].replace("MC-", "").replace("mc-", "").strip()
+
+    await update.message.reply_text(u"\U0001f50d \u041f\u0440\u043e\u0432\u0435\u0440\u044f\u044e MC-" + mc_number + u"...")
+
+    try:
+        response = requests.get(
+            f"https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string={mc_number}",
+            timeout=10
+        )
+
+        text = response.text
+
+        # Parse company name
+        import re as re2
+        name_match = re2.search(r'Legal Name.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
+        name = name_match.group(1).strip() if name_match else ""
+        name = re2.sub(r'<[^>]+>', '', name).strip()
+
+        # Parse status
+        status_match = re2.search(r'Operating Status.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
+        status = status_match.group(1).strip() if status_match else ""
+        status = re2.sub(r'<[^>]+>', '', status).strip()
+
+        # Parse USDOT
+        dot_match = re2.search(r'USDOT Number.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
+        dot = dot_match.group(1).strip() if dot_match else ""
+        dot = re2.sub(r'<[^>]+>', '', dot).strip()
+
+        # Parse insurance
+        ins_match = re2.search(r'Insurance.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
+        ins = ins_match.group(1).strip() if ins_match else ""
+        ins = re2.sub(r'<[^>]+>', '', ins).strip()
+
+        if name:
+            emoji = u"\u2705" if "AUTHORIZED" in status.upper() or "ACTIVE" in status.upper() else u"\u274c"
+            reply = (
+                f"{emoji} MC-{mc_number}\n\n"
+                f"\U0001f3e2 {name}\n"
+                f"\U0001f4cb USDOT: {dot}\n"
+                f"\U0001f4ca Status: {status}\n"
+                f"\U0001f6e1 Insurance: {ins}"
+            )
+        else:
+            reply = u"\u274c MC-" + mc_number + u" \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d \u0432 \u0431\u0430\u0437\u0435 FMCSA."
+
+        await update.message.reply_text(reply)
+
+    except Exception as e:
+        logging.error(f"MC check error: {e}")
+        await update.message.reply_text(u"\u274c \u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0435. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439 \u043f\u043e\u0437\u0436\u0435.")
+
+
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect("reminders.db")
     c = conn.cursor()
@@ -389,6 +446,7 @@ def main():
     app.add_handler(CommandHandler("r", r_command))
     app.add_handler(CommandHandler("list", list_command))
     app.add_handler(CommandHandler("del", del_command))
+    app.add_handler(CommandHandler("mc", mc_command))
     app.add_handler(CommandHandler("users", users_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
