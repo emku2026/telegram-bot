@@ -282,10 +282,13 @@ async def mc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         response = requests.get(
             f"https://safer.fmcsa.dot.gov/query.asp?searchtype=ANY&query_type=queryCarrierSnapshot&query_param=MC_MX&query_string={mc_number}",
-            timeout=10
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
         )
 
         text = response.text
+        logging.info(f"FMCSA response length: {len(text)}")
+        logging.info(f"FMCSA snippet: {text[1000:2000]}")
 
         # Parse company name
         import re as re2
