@@ -290,31 +290,27 @@ async def mc_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.info(f"FMCSA response length: {len(text)}")
         logging.info(f"FMCSA snippet: {text[1000:2000]}")
 
-        # Parse company name
         import re as re2
-        name_match = re2.search(r'Legal Name.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
-        name = name_match.group(1).strip() if name_match else ""
-        name = re2.sub(r'<[^>]+>', '', name).strip()
 
-        # Parse status
-        status_match = re2.search(r'Operating Status.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
-        status = status_match.group(1).strip() if status_match else ""
-        status = re2.sub(r'<[^>]+>', '', status).strip()
+        def parse_field(html, label):
+            pattern = r'<td[^>]*>\s*' + re2.escape(label) + r'\s*</td>\s*<td[^>]*>(.*?)</td>'
+            match = re2.search(pattern, html, re2.DOTALL | re2.IGNORECASE)
+            if not match:
+                pattern2 = label + r'[^<]*</[^>]+>\s*<td[^>]*>(.*?)</td>'
+                match = re2.search(pattern2, html, re2.DOTALL | re2.IGNORECASE)
+            if match:
+                val = re2.sub(r'<[^>]+>', '', match.group(1))
+                val = val.replace('&nbsp;', ' ').strip()
+                return val
+            return ""
 
-        # Parse USDOT
-        dot_match = re2.search(r'USDOT Number.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
-        dot = dot_match.group(1).strip() if dot_match else ""
-        dot = re2.sub(r'<[^>]+>', '', dot).strip()
+        name   = parse_field(text, "Legal Name")
+        dot    = parse_field(text, "USDOT Number")
+        status = parse_field(text, "Operating Status")
+        phone  = parse_field(text, "Phone")
 
-        # Parse insurance
-        ins_match = re2.search(r'Insurance.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
-        ins = ins_match.group(1).strip() if ins_match else ""
-        ins = re2.sub(r'<[^>]+>', '', ins).strip()
-
-        # Parse phone
-        phone_match = re2.search(r'Phone.*?<td[^>]*>(.*?)</td>', text, re2.DOTALL | re2.IGNORECASE)
-        phone = phone_match.group(1).strip() if phone_match else ""
-        phone = re2.sub(r'<[^>]+>', '', phone).strip()
+        # Insurance - look for active/authorized keywords
+        ins = "Active" if "insurance" in text.lower() and "unavailable" not in text.lower() else "Check manually"
 
         if name:
             emoji = u"\u2705" if "AUTHORIZED" in status.upper() or "ACTIVE" in status.upper() else u"\u274c"
