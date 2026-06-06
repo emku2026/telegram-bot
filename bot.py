@@ -456,7 +456,6 @@ def main():
     app.add_handler(CommandHandler("r", r_command))
     app.add_handler(CommandHandler("list", list_command))
     app.add_handler(CommandHandler("del", del_command))
-    app.add_handler(CommandHandler("mc", mc_command))
     app.add_handler(CommandHandler("users", users_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
