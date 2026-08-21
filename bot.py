@@ -75,7 +75,8 @@ def get_rc_token():
         data={
             "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
             "assertion": RC_JWT
-        }
+        },
+        timeout=15
     )
 
     if response.status_code == 200:
@@ -104,7 +105,8 @@ async def check_rc_sms(app):
                 "messageType": "SMS",
                 "dateFrom": date_from,
                 "perPage": 20
-            }
+            },
+            timeout=15
         )
 
         if response.status_code != 200:
@@ -143,7 +145,8 @@ async def check_rc_sms(app):
                     if att.get("type") == "Text":
                         att_response = requests.get(
                             att["uri"],
-                            headers={"Authorization": f"Bearer {token}"}
+                            headers={"Authorization": f"Bearer {token}"},
+                            timeout=15
                         )
                         logging.info(f"Attachment response: {att_response.status_code} '{att_response.text[:100]}'")
                         if att_response.status_code == 200:
